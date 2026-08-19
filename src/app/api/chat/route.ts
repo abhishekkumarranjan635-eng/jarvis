@@ -5,6 +5,8 @@ type ExternalProvider = Exclude<Provider, "local">;
 type ChatMessage = { role: "user" | "assistant"; text: string };
 type SearchTopic = { Text?: string; FirstURL?: string; Topics?: SearchTopic[] };
 type SearchResponse = { AbstractText?: string; AbstractSource?: string; AbstractURL?: string; RelatedTopics?: SearchTopic[] };
+type WikiSummary = { extract?: string; content_urls?: { desktop?: { page?: string } } };
+type WikiSearchResult = { title: string; snippet: string; pageid: number };
 
 const systemPrompt = "You are Jarvis, Abhishek's personal AI assistant. Follow the user's instruction directly and answer the request, rather than offering generic next steps. Use the conversation context when relevant. Be concise, accurate, and truthful about capabilities or unavailable live data. Ask one focused question only when essential information is missing. When research is provided, base the answer on it, mention the source naturally, and do not claim to have accessed private apps or websites.";
 
@@ -55,26 +57,70 @@ function collectTopics(topics: SearchTopic[] | undefined, results: SearchTopic[]
   return results;
 }
 
-async function researchWeb(query: string): Promise<{ facts: string; sources: string[] } | null> {
+async function duckDuckGoSearch(query: string): Promise<{ text: string; url: string }[]> {
   try {
     const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, {
       headers: { Accept: "application/json" },
       next: { revalidate: 3600 },
     });
-    if (!response.ok) return null;
+    if (!response.ok) return [];
     const result = await response.json() as SearchResponse;
     const topics = collectTopics(result.RelatedTopics);
     const entries: { text: string; url: string }[] = [];
     if (result.AbstractText && result.AbstractURL) entries.push({ text: result.AbstractText, url: result.AbstractURL });
     for (const topic of topics) if (topic.Text && topic.FirstURL) entries.push({ text: topic.Text, url: topic.FirstURL });
-    if (!entries.length) return null;
-    return {
-      facts: entries.map((entry) => `- ${entry.text}\n  Source: ${entry.url}`).join("\n"),
-      sources: entries.map((entry) => entry.url),
-    };
+    return entries;
   } catch {
-    return null;
+    return [];
   }
+}
+
+async function wikipediaSearch(query: string): Promise<{ text: string; url: string }[]> {
+  try {
+    const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`, {
+      headers: { Accept: "application/json", "Api-User-Agent": "Jarvis/1.0 (assistant)" },
+      next: { revalidate: 3600 },
+    });
+    if (summary.ok) {
+      const payload = await summary.json() as WikiSummary;
+      if (payload.extract && payload.content_urls?.desktop?.page) return [{ text: payload.extract, url: payload.content_urls.desktop.page }];
+    }
+    const search = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=5&format=json&origin=*`, {
+      headers: { Accept: "application/json", "Api-User-Agent": "Jarvis/1.0 (assistant)" },
+      next: { revalidate: 3600 },
+    });
+    if (!search.ok) return [];
+    const payload = await search.json() as { query?: { search?: WikiSearchResult[] } };
+    const results = payload.query?.search ?? [];
+    return Promise.all(results.slice(0, 4).map(async (item) => {
+      try {
+        const page = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(item.title)}`, {
+          headers: { Accept: "application/json", "Api-User-Agent": "Jarvis/1.0 (assistant)" },
+          next: { revalidate: 3600 },
+        });
+        if (!page.ok) return null;
+        const pagePayload = await page.json() as WikiSummary;
+        const url = pagePayload.content_urls?.desktop?.page ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`;
+        return { text: pagePayload.extract ?? item.snippet.replace(/<[^>]+>/g, ""), url };
+      } catch {
+        return null;
+      }
+    })).then((entries) => entries.filter((entry): entry is { text: string; url: string } => entry !== null));
+  } catch {
+    return [];
+  }
+}
+
+async function researchWeb(query: string): Promise<{ facts: string; sources: string[] } | null> {
+  const entries = await Promise.all([duckDuckGoSearch(query), wikipediaSearch(query)]).then((results) => results.flat());
+  if (!entries.length) return null;
+  const dedup = new Map<string, { text: string; url: string }>();
+  for (const entry of entries) if (!dedup.has(entry.url)) dedup.set(entry.url, entry);
+  const unique = [...dedup.values()].slice(0, 5);
+  return {
+    facts: unique.map((entry) => `- ${entry.text}\n  Source: ${entry.url}`).join("\n"),
+    sources: unique.map((entry) => entry.url),
+  };
 }
 
 async function requestProvider(provider: Provider, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string, backingProvider?: ExternalProvider): Promise<{ reply: string; sources: string[] }> {
@@ -88,7 +134,7 @@ async function requestProvider(provider: Provider, message: string, history: Cha
       }
       return { reply: "I could not find reliable public web information for that request right now. Try adding a little more detail to the instruction.", sources: [] };
     }
-    const researchedMessage = research ? `${message}\n\nWeb research collected before answering:\n${research.facts}\n\nUse this research when relevant, cite the source URLs naturally, and do not claim to have accessed private apps or websites.` : message;
+    const researchedMessage = research ? `${message}\n\nWeb research collected before answering:\n${research.facts}\n\nBase your answer on this research, cite the source URLs naturally, and do not claim to have accessed private apps or websites.` : message;
     const reply = await requestExternalProvider(configuredProvider, researchedMessage, history, sessionKey, requestedModel);
     return { reply, sources: research?.sources ?? [] };
   }
