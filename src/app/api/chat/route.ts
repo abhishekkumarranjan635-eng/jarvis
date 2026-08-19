@@ -9,7 +9,7 @@ function error(message: string, status: number) {
 }
 
 export async function POST(request: Request) {
-  let body: { provider?: Provider; message?: string };
+  let body: { provider?: Provider; message?: string; apiKey?: string };
   try {
     body = await request.json();
   } catch {
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const reply = await requestProvider(body.provider, body.message.trim());
+    const reply = await requestProvider(body.provider, body.message.trim(), body.apiKey);
     return NextResponse.json({ reply });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "The AI connector could not be reached.";
@@ -29,9 +29,9 @@ export async function POST(request: Request) {
   }
 }
 
-async function requestProvider(provider: Provider, message: string) {
+async function requestProvider(provider: Provider, message: string, sessionKey?: string) {
   if (provider === "openai") {
-    const key = process.env.OPENAI_API_KEY;
+    const key = sessionKey || process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OpenAI is not connected. Add OPENAI_API_KEY to the server environment.");
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -44,7 +44,7 @@ async function requestProvider(provider: Provider, message: string) {
   }
 
   if (provider === "anthropic") {
-    const key = process.env.ANTHROPIC_API_KEY;
+    const key = sessionKey || process.env.ANTHROPIC_API_KEY;
     if (!key) throw new Error("Anthropic is not connected. Add ANTHROPIC_API_KEY to the server environment.");
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -56,7 +56,7 @@ async function requestProvider(provider: Provider, message: string) {
     return payload.content?.[0]?.text ?? "Claude returned no response.";
   }
 
-  const key = process.env.GEMINI_API_KEY;
+  const key = sessionKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Google Gemini is not connected. Add GEMINI_API_KEY to the server environment.");
   const model = process.env.GEMINI_MODEL ?? "gemini-2.5-pro";
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {

@@ -137,6 +137,9 @@ export default function Home() {
   const [activeRecent, setActiveRecent] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelId>("local");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [connectorModel, setConnectorModel] = useState<Exclude<ModelId, "local"> | null>(null);
+  const [connectorKey, setConnectorKey] = useState("");
+  const [sessionKeys, setSessionKeys] = useState<Partial<Record<ModelId, string>>>({});
 
   function submitMessage(text = message) {
     const prompt = text.trim();
@@ -171,7 +174,7 @@ export default function Home() {
     void fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: selectedModel, message: prompt }),
+      body: JSON.stringify({ provider: selectedModel, message: prompt, apiKey: sessionKeys[selectedModel] }),
     })
       .then(async (response) => {
         const body = await response.json() as { reply?: string; error?: string };
@@ -199,6 +202,25 @@ export default function Home() {
     setMessages([]);
     setMessage("");
     setMenuOpen(false);
+  }
+
+  function selectConnector(model: ModelId) {
+    if (model === "local") {
+      setSelectedModel(model);
+      setModelMenuOpen(false);
+      return;
+    }
+    setConnectorModel(model);
+    setConnectorKey(sessionKeys[model] ?? "");
+    setModelMenuOpen(false);
+  }
+
+  function connectProvider() {
+    if (!connectorModel || !connectorKey.trim()) return;
+    setSessionKeys((keys) => ({ ...keys, [connectorModel]: connectorKey.trim() }));
+    setSelectedModel(connectorModel);
+    setConnectorModel(null);
+    setConnectorKey("");
   }
 
   return (
@@ -231,8 +253,8 @@ export default function Home() {
             </button>
             {modelMenuOpen && <div className="model-menu">
               <p>AI CONNECTORS</p>
-              {models.map((model) => <button key={model.id} className={selectedModel === model.id ? "selected" : ""} onClick={() => { setSelectedModel(model.id); setModelMenuOpen(false); }}>
-                <span><strong>{model.label}</strong><small>{model.detail}</small></span>{selectedModel === model.id ? <Check size={15} /> : <em>{model.ready ? "Ready" : "API key"}</em>}
+              {models.map((model) => <button key={model.id} className={selectedModel === model.id ? "selected" : ""} onClick={() => selectConnector(model.id)}>
+                <span><strong>{model.label}</strong><small>{model.detail}</small></span>{selectedModel === model.id ? <Check size={15} /> : <em>{model.ready ? "Ready" : sessionKeys[model.id] ? "Connected" : "API key"}</em>}
               </button>)}
               <div className="model-note">Providers use your own authorized API access.</div>
             </div>}
@@ -275,6 +297,20 @@ export default function Home() {
           </div>
           <div className="composer-meta"><span><Volume2 size={14} />Voice ready</span><span>Jarvis can make mistakes. Check important info.</span></div>
         </div>
+
+        {connectorModel && <div className="connector-overlay" role="dialog" aria-modal="true" aria-labelledby="connector-title">
+          <div className="connector-dialog">
+            <button className="connector-close" onClick={() => setConnectorModel(null)} aria-label="Close connector settings"><X size={18} /></button>
+            <div className="connector-symbol"><Cpu size={19} /></div>
+            <p className="eyebrow">AI CONNECTOR</p>
+            <h2 id="connector-title">Connect {models.find((model) => model.id === connectorModel)?.label}</h2>
+            <p className="connector-copy">Enter an authorized API key to use this provider for the current browser session.</p>
+            <label htmlFor="connector-key">API key</label>
+            <input id="connector-key" type="password" value={connectorKey} onChange={(event) => setConnectorKey(event.target.value)} placeholder={`Paste your ${models.find((model) => model.id === connectorModel)?.label} API key`} autoFocus />
+            <p className="connector-note">Your key is sent only when you make a request and is cleared when you refresh this page.</p>
+            <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)}>Cancel</button><button className="connect-connector" onClick={connectProvider} disabled={!connectorKey.trim()}>Connect provider <ArrowUp size={15} /></button></div>
+          </div>
+        </div>}
       </section>
     </main>
   );
