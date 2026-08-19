@@ -1,65 +1,101 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import {
+  ArrowUp,
+  Check,
+  ChevronDown,
+  Clock3,
+  FileText,
+  Globe2,
+  Menu,
+  Mic,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Sparkles,
+  Volume2,
+  X,
+} from "lucide-react";
+
+const suggestions = [
+  { icon: Globe2, title: "Plan my day", detail: "Review calendar, tasks & weather" },
+  { icon: FileText, title: "Summarize notes", detail: "Turn recent notes into highlights" },
+  { icon: Search, title: "Research anything", detail: "Search the web with cited sources" },
+];
+
+const recent = ["Monday planning", "Flight options to Tokyo", "Project Luna notes"];
 
 export default function Home() {
+  const [message, setMessage] = useState("");
+  const [listening, setListening] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  function submitMessage() {
+    if (!message.trim()) return;
+    setSent(true);
+    setMessage("");
+    window.setTimeout(() => setSent(false), 2400);
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="jarvis-shell">
+      <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
+        <div className="brand-row">
+          <div className="mark"><Sparkles size={16} strokeWidth={2.4} /></div>
+          <span>jarvis</span>
+          <button className="close-menu" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={19} /></button>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <button className="new-chat"><Plus size={17} /> New conversation</button>
+        <nav className="history" aria-label="Conversation history">
+          <p>RECENT</p>
+          {recent.map((item, index) => <button key={item} className={index === 0 ? "active" : ""}><Clock3 size={15} />{item}</button>)}
+        </nav>
+        <div className="sidebar-foot">
+          <div className="avatar">A</div>
+          <div><strong>Abhishek</strong><span>Personal workspace</span></div>
+          <MoreHorizontal size={18} />
         </div>
-      </main>
-    </div>
+      </aside>
+
+      <section className="workspace">
+        <header className="topbar">
+          <button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
+          <div className="topbar-title"><span>New conversation</span><ChevronDown size={15} /></div>
+          <div className="mode"><span className="mode-dot" />All systems operational</div>
+        </header>
+
+        <div className="conversation">
+          <div className="welcome">
+            <div className="orb-wrap"><div className="orb"><span /></div></div>
+            <p className="eyebrow">YOUR PERSONAL INTELLIGENCE</p>
+            <h1>Good morning, Abhishek.</h1>
+            <p className="lead">What can I help you accomplish?</p>
+          </div>
+
+          <div className="suggestion-grid">
+            {suggestions.map(({ icon: Icon, title, detail }) => (
+              <button className="suggestion" key={title} onClick={() => setMessage(title)}>
+                <span className="suggestion-icon"><Icon size={18} /></span>
+                <span><strong>{title}</strong><small>{detail}</small></span>
+                <ArrowUp className="suggestion-arrow" size={16} />
+              </button>
+            ))}
+          </div>
+
+          {sent && <div className="reply"><Check size={16} />I&apos;m on it. I&apos;ll keep this concise and let you know when it&apos;s ready.</div>}
+        </div>
+
+        <div className="composer-area">
+          <div className="composer">
+            <input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitMessage()} placeholder="Ask Jarvis anything..." aria-label="Message Jarvis" />
+            <button className={`mic ${listening ? "listening" : ""}`} onClick={() => setListening(!listening)} aria-label="Use voice input"><Mic size={19} /></button>
+            <button className="send" onClick={submitMessage} disabled={!message.trim()} aria-label="Send message"><ArrowUp size={18} /></button>
+          </div>
+          <div className="composer-meta"><span><Volume2 size={14} />Voice ready</span><span>Jarvis can make mistakes. Check important info.</span></div>
+        </div>
+      </section>
+    </main>
   );
 }
