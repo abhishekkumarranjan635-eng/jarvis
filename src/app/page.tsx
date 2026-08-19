@@ -140,6 +140,8 @@ export default function Home() {
   const [connectorModel, setConnectorModel] = useState<Exclude<ModelId, "local"> | null>(null);
   const [connectorKey, setConnectorKey] = useState("");
   const [sessionKeys, setSessionKeys] = useState<Partial<Record<ModelId, string>>>({});
+  const [connectorError, setConnectorError] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
 
   function submitMessage(text = message) {
     const prompt = text.trim();
@@ -212,15 +214,31 @@ export default function Home() {
     }
     setConnectorModel(model);
     setConnectorKey(sessionKeys[model] ?? "");
+    setConnectorError("");
     setModelMenuOpen(false);
   }
 
-  function connectProvider() {
+  async function connectProvider() {
     if (!connectorModel || !connectorKey.trim()) return;
-    setSessionKeys((keys) => ({ ...keys, [connectorModel]: connectorKey.trim() }));
-    setSelectedModel(connectorModel);
-    setConnectorModel(null);
-    setConnectorKey("");
+    setIsConnecting(true);
+    setConnectorError("");
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: connectorModel, apiKey: connectorKey.trim(), message: "Reply with exactly the word connected." }),
+      });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "The provider rejected this API key.");
+      setSessionKeys((keys) => ({ ...keys, [connectorModel]: connectorKey.trim() }));
+      setSelectedModel(connectorModel);
+      setConnectorModel(null);
+      setConnectorKey("");
+    } catch (error: unknown) {
+      setConnectorError(error instanceof Error ? error.message : "The provider could not validate this API key.");
+    } finally {
+      setIsConnecting(false);
+    }
   }
 
   return (
@@ -307,8 +325,9 @@ export default function Home() {
             <p className="connector-copy">Enter an authorized API key to use this provider for the current browser session.</p>
             <label htmlFor="connector-key">API key</label>
             <input id="connector-key" type="password" value={connectorKey} onChange={(event) => setConnectorKey(event.target.value)} placeholder={`Paste your ${models.find((model) => model.id === connectorModel)?.label} API key`} autoFocus />
-            <p className="connector-note">Your key is sent only when you make a request and is cleared when you refresh this page.</p>
-            <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)}>Cancel</button><button className="connect-connector" onClick={connectProvider} disabled={!connectorKey.trim()}>Connect provider <ArrowUp size={15} /></button></div>
+            {connectorError && <p className="connector-error">{connectorError}</p>}
+            <p className="connector-note">Jarvis validates the key with a small provider request before connecting. Your key is cleared when you refresh this page.</p>
+            <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)} disabled={isConnecting}>Cancel</button><button className="connect-connector" onClick={() => void connectProvider()} disabled={!connectorKey.trim() || isConnecting}>{isConnecting ? "Validating..." : "Connect provider"} <ArrowUp size={15} /></button></div>
           </div>
         </div>}
       </section>
