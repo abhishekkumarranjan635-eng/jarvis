@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   ArrowUp,
-  Check,
   ChevronDown,
   Clock3,
   FileText,
@@ -26,17 +25,45 @@ const suggestions = [
 
 const recent = ["Monday planning", "Flight options to Tokyo", "Project Luna notes"];
 
+type ChatMessage = {
+  role: "user" | "assistant";
+  text: string;
+};
+
+function getReply(prompt: string) {
+  const query = prompt.toLowerCase();
+  if (query.includes("plan") || query.includes("day")) {
+    return "Here is a focused plan: review your top priority, reserve a 90-minute deep-work block, and leave 30 minutes before your next meeting to clear messages.";
+  }
+  if (query.includes("note") || query.includes("summar")) {
+    return "I can summarize your notes once a notes integration is connected. For now, paste the text here and I will turn it into key decisions, actions, and open questions.";
+  }
+  if (query.includes("research") || query.includes("search")) {
+    return "I do not have a web-search integration connected in this preview. Tell me the topic and I can still help you form a concise research brief or evaluate sources you provide.";
+  }
+  if (query.includes("weather")) {
+    return "I do not have live weather access connected in this preview, so I cannot reliably check conditions. I can help you plan what to look for, though.";
+  }
+  return "Understood. I am operating in preview mode, so I can help with conversation and planning here, while connected automations remain unavailable.";
+}
+
 export default function Home() {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  function submitMessage() {
-    if (!message.trim()) return;
-    setSent(true);
+  function submitMessage(text = message) {
+    const prompt = text.trim();
+    if (!prompt || isThinking) return;
+    setMessages((current) => [...current, { role: "user", text: prompt }]);
     setMessage("");
-    window.setTimeout(() => setSent(false), 2400);
+    setIsThinking(true);
+    window.setTimeout(() => {
+      setMessages((current) => [...current, { role: "assistant", text: getReply(prompt) }]);
+      setIsThinking(false);
+    }, 650);
   }
 
   return (
@@ -67,31 +94,37 @@ export default function Home() {
         </header>
 
         <div className="conversation">
-          <div className="welcome">
-            <div className="orb-wrap"><div className="orb"><span /></div></div>
-            <p className="eyebrow">YOUR PERSONAL INTELLIGENCE</p>
-            <h1>Good morning, Abhishek.</h1>
-            <p className="lead">What can I help you accomplish?</p>
-          </div>
+          {messages.length === 0 ? <>
+            <div className="welcome">
+              <div className="orb-wrap"><div className="orb"><span /></div></div>
+              <p className="eyebrow">YOUR PERSONAL INTELLIGENCE</p>
+              <h1>Good morning, Abhishek.</h1>
+              <p className="lead">What can I help you accomplish?</p>
+            </div>
 
-          <div className="suggestion-grid">
-            {suggestions.map(({ icon: Icon, title, detail }) => (
-              <button className="suggestion" key={title} onClick={() => setMessage(title)}>
-                <span className="suggestion-icon"><Icon size={18} /></span>
-                <span><strong>{title}</strong><small>{detail}</small></span>
-                <ArrowUp className="suggestion-arrow" size={16} />
-              </button>
-            ))}
-          </div>
-
-          {sent && <div className="reply"><Check size={16} />I&apos;m on it. I&apos;ll keep this concise and let you know when it&apos;s ready.</div>}
+            <div className="suggestion-grid">
+              {suggestions.map(({ icon: Icon, title, detail }) => (
+                <button className="suggestion" key={title} onClick={() => submitMessage(title)}>
+                  <span className="suggestion-icon"><Icon size={18} /></span>
+                  <span><strong>{title}</strong><small>{detail}</small></span>
+                  <ArrowUp className="suggestion-arrow" size={16} />
+                </button>
+              ))}
+            </div>
+          </> : <div className="messages" aria-live="polite">
+            {messages.map((item, index) => <div className={`message ${item.role}`} key={`${item.role}-${index}`}>
+              {item.role === "assistant" && <div className="message-mark"><Sparkles size={13} /></div>}
+              <p>{item.text}</p>
+            </div>)}
+            {isThinking && <div className="message assistant thinking"><div className="message-mark"><Sparkles size={13} /></div><p><i /><i /><i /></p></div>}
+          </div>}
         </div>
 
         <div className="composer-area">
           <div className="composer">
             <input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitMessage()} placeholder="Ask Jarvis anything..." aria-label="Message Jarvis" />
-            <button className={`mic ${listening ? "listening" : ""}`} onClick={() => setListening(!listening)} aria-label="Use voice input"><Mic size={19} /></button>
-            <button className="send" onClick={submitMessage} disabled={!message.trim()} aria-label="Send message"><ArrowUp size={18} /></button>
+            <button className={`mic ${listening ? "listening" : ""}`} onClick={() => { setListening(!listening); setMessage(listening ? "" : "Listening is not available in this preview."); }} aria-label="Use voice input"><Mic size={19} /></button>
+            <button className="send" onClick={() => submitMessage()} disabled={!message.trim()} aria-label="Send message"><ArrowUp size={18} /></button>
           </div>
           <div className="composer-meta"><span><Volume2 size={14} />Voice ready</span><span>Jarvis can make mistakes. Check important info.</span></div>
         </div>
