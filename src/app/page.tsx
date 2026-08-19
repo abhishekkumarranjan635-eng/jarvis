@@ -121,6 +121,13 @@ function getReply(prompt: string, now = new Date()) {
   return `I understand: "${prompt}". I can help you break this into a clear next step, draft a response, or make a practical plan. Which direction would be most useful?`;
 }
 
+function shouldSearchWeb(prompt: string) {
+  const query = prompt.toLowerCase().trim();
+  const question = /^(what|who|when|where|why|how|define|explain|tell me about)\b/.test(query);
+  const localRequest = query.includes("what can you do") || query.includes("your capabilities") || query.includes("remind") || query.includes("email") || query.includes("plan my");
+  return question && !localRequest;
+}
+
 export default function Home() {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
@@ -138,6 +145,22 @@ export default function Home() {
     setMessage("");
     setIsThinking(true);
     if (selectedModel === "local") {
+      if (shouldSearchWeb(prompt)) {
+        void fetch("/api/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: prompt }),
+        })
+          .then(async (response) => {
+            const body = await response.json() as { answer?: string; error?: string };
+            if (!response.ok || !body.answer) throw new Error(body.error ?? "No useful result was found.");
+            return body.answer;
+          })
+          .then((answer) => setMessages((current) => [...current, { role: "assistant", text: answer }]))
+          .catch(() => setMessages((current) => [...current, { role: "assistant", text: "I could not reach the web knowledge service right now. Select an authorized AI connector for a direct model response, or try again shortly." }]))
+          .finally(() => setIsThinking(false));
+        return;
+      }
       window.setTimeout(() => {
         setMessages((current) => [...current, { role: "assistant", text: getReply(prompt, new Date()) }]);
         setIsThinking(false);
