@@ -45,8 +45,41 @@ type ChatMessage = {
   text: string;
 };
 
-function getReply(prompt: string) {
+function getReply(prompt: string, now = new Date()) {
   const query = prompt.toLowerCase();
+  const dateFormatter = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  const shortDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+  const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
+  const dayOfWeek = now.getDay();
+  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - daysFromMonday);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+
+  if (query.includes("time") && !query.includes("times")) {
+    return `It is ${timeFormatter.format(now)} on ${dateFormatter.format(now)}.`;
+  }
+  if (query.includes("what day") || query.includes("today") || query.includes("date")) {
+    return `Today is ${dateFormatter.format(now)}.`;
+  }
+  if (query.includes("week")) {
+    return `This week runs from ${shortDateFormatter.format(weekStart)} through ${shortDateFormatter.format(weekEnd)}. Today is ${dateFormatter.format(now)}.`;
+  }
+  if (query.includes("month")) {
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return `It is ${monthFormatter.format(now)}. This month has ${daysInMonth} days, and today is ${dateFormatter.format(now)}.`;
+  }
   if (query.includes("plan") || query.includes("day")) {
     return "Here is a focused plan: review your top priority, reserve a 90-minute deep-work block, and leave 30 minutes before your next meeting to clear messages.";
   }
@@ -89,7 +122,7 @@ export default function Home() {
     setMessage("");
     setIsThinking(true);
     window.setTimeout(() => {
-      setMessages((current) => [...current, { role: "assistant", text: getReply(prompt) }]);
+      setMessages((current) => [...current, { role: "assistant", text: getReply(prompt, new Date()) }]);
       setIsThinking(false);
     }, 650);
   }
