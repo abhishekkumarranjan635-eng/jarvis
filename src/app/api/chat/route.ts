@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 type Provider = "local" | "openai" | "anthropic" | "gemini";
+type ExternalProvider = Exclude<Provider, "local">;
 type ChatMessage = { role: "user" | "assistant"; text: string };
 
 const systemPrompt = "You are Jarvis, Abhishek's personal AI assistant. Follow the user's instruction directly and answer the request, rather than offering generic next steps. Use the conversation context when relevant. Be concise, accurate, and truthful about capabilities or unavailable live data. Ask one focused question only when essential information is missing.";
@@ -10,7 +11,7 @@ function error(message: string, status: number) {
 }
 
 export async function POST(request: Request) {
-  let body: { provider?: Provider; message?: string; messages?: ChatMessage[]; apiKey?: string; model?: string };
+  let body: { provider?: Provider; backingProvider?: ExternalProvider; message?: string; messages?: ChatMessage[]; apiKey?: string; model?: string };
   try {
     body = await request.json();
   } catch {
@@ -20,12 +21,15 @@ export async function POST(request: Request) {
   if (!body.message?.trim() || !body.provider || !["local", "openai", "anthropic", "gemini"].includes(body.provider)) {
     return error("Choose a connector and enter a message.", 400);
   }
+  if (body.backingProvider && !["openai", "anthropic", "gemini"].includes(body.backingProvider)) {
+    return error("Choose a valid AI provider.", 400);
+  }
 
   try {
     const history = body.messages?.filter((item): item is ChatMessage =>
       (item.role === "user" || item.role === "assistant") && typeof item.text === "string" && item.text.trim().length > 0,
     ).slice(-12);
-    const reply = await requestProvider(body.provider, body.message.trim(), history, body.apiKey, body.model);
+    const reply = await requestProvider(body.provider, body.message.trim(), history, body.apiKey, body.model, body.backingProvider);
     return NextResponse.json({ reply });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "The AI connector could not be reached.";
@@ -40,11 +44,11 @@ function defaultProvider(): Exclude<Provider, "local"> | null {
   return null;
 }
 
-async function requestProvider(provider: Provider, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string) {
+async function requestProvider(provider: Provider, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string, backingProvider?: ExternalProvider) {
   if (provider === "local") {
-    const configuredProvider = defaultProvider();
+    const configuredProvider = backingProvider ?? defaultProvider();
     if (!configuredProvider) throw new Error("Connect an AI provider with an API key to receive accurate answers. Open the model menu and choose OpenAI, Anthropic, or Google Gemini.");
-    return requestProvider(configuredProvider, message, history, undefined, undefined);
+    return requestProvider(configuredProvider, message, history, sessionKey, requestedModel);
   }
   const model = requestedModel?.trim();
   if (model && !/^[a-zA-Z0-9._-]+$/.test(model)) throw new Error("The model ID contains unsupported characters.");

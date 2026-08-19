@@ -92,6 +92,7 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeRecent, setActiveRecent] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelId>("local");
+  const [localConnector, setLocalConnector] = useState<Exclude<ModelId, "local"> | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [connectorModel, setConnectorModel] = useState<Exclude<ModelId, "local"> | null>(null);
   const [connectorKey, setConnectorKey] = useState("");
@@ -110,7 +111,14 @@ export default function Home() {
     void fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: selectedModel, message: prompt, messages, apiKey: sessionConnectors[selectedModel]?.apiKey, model: sessionConnectors[selectedModel]?.model }),
+      body: JSON.stringify({
+        provider: selectedModel,
+        backingProvider: selectedModel === "local" ? localConnector ?? undefined : undefined,
+        message: prompt,
+        messages,
+        apiKey: selectedModel === "local" && localConnector ? sessionConnectors[localConnector]?.apiKey : sessionConnectors[selectedModel]?.apiKey,
+        model: selectedModel === "local" && localConnector ? sessionConnectors[localConnector]?.model : sessionConnectors[selectedModel]?.model,
+      }),
     })
       .then(async (response) => {
         const body = await response.json() as { reply?: string; error?: string };
@@ -166,7 +174,8 @@ export default function Home() {
       const body = await response.json() as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "The provider rejected this API key.");
       setSessionConnectors((connectors) => ({ ...connectors, [connectorModel]: { apiKey: connectorKey.trim(), model: connectorVersion.trim() } }));
-      setSelectedModel(connectorModel);
+      setLocalConnector(connectorModel);
+      setSelectedModel("local");
       setConnectorModel(null);
       setConnectorKey("");
       setConnectorVersion("");
@@ -248,7 +257,7 @@ export default function Home() {
           <div className="topbar-title"><span>{activeRecent ?? "New conversation"}</span><ChevronDown size={15} /></div>
           <div className="model-switcher">
             <button className="model-trigger" onClick={() => setModelMenuOpen((open) => !open)} aria-expanded={modelMenuOpen}>
-              <Cpu size={15} /><span>{models.find((model) => model.id === selectedModel)?.label}</span><ChevronDown size={14} />
+              <Cpu size={15} /><span>{selectedModel === "local" && localConnector ? `Jarvis local (${models.find((model) => model.id === localConnector)?.label})` : models.find((model) => model.id === selectedModel)?.label}</span><ChevronDown size={14} />
             </button>
             {modelMenuOpen && <div className="model-menu">
               <p>AI CONNECTORS</p>
