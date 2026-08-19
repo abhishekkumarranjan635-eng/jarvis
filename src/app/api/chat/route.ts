@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 type Provider = "local" | "openai" | "anthropic" | "gemini";
 type ExternalProvider = Exclude<Provider, "local">;
 type ChatMessage = { role: "user" | "assistant"; text: string };
+type SearchTopic = { Text?: string; FirstURL?: string; Topics?: SearchTopic[] };
+type SearchResponse = { AbstractText?: string; AbstractSource?: string; AbstractURL?: string; RelatedTopics?: SearchTopic[] };
 
 const systemPrompt = "You are Jarvis, Abhishek's personal AI assistant. Follow the user's instruction directly and answer the request, rather than offering generic next steps. Use the conversation context when relevant. Be concise, accurate, and truthful about capabilities or unavailable live data. Ask one focused question only when essential information is missing.";
 
@@ -44,11 +46,44 @@ function defaultProvider(): Exclude<Provider, "local"> | null {
   return null;
 }
 
+function collectTopics(topics: SearchTopic[] | undefined, results: SearchTopic[] = []): SearchTopic[] {
+  for (const topic of topics ?? []) {
+    if (topic.Text && topic.FirstURL) results.push(topic);
+    if (topic.Topics) collectTopics(topic.Topics, results);
+    if (results.length >= 4) break;
+  }
+  return results;
+}
+
+async function researchWeb(query: string) {
+  try {
+    const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, {
+      headers: { Accept: "application/json" },
+      next: { revalidate: 3600 },
+    });
+    if (!response.ok) return null;
+    const result = await response.json() as SearchResponse;
+    const topics = collectTopics(result.RelatedTopics);
+    const sources = [
+      result.AbstractText && result.AbstractURL ? `- ${result.AbstractText}\n  Source: ${result.AbstractURL}` : "",
+      ...topics.map((topic) => `- ${topic.Text}\n  Source: ${topic.FirstURL}`),
+    ].filter(Boolean);
+    return sources.length ? sources.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+
 async function requestProvider(provider: Provider, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string, backingProvider?: ExternalProvider) {
   if (provider === "local") {
     const configuredProvider = backingProvider ?? defaultProvider();
-    if (!configuredProvider) throw new Error("Connect an AI provider with an API key to receive accurate answers. Open the model menu and choose OpenAI, Anthropic, or Google Gemini.");
-    return requestProvider(configuredProvider, message, history, sessionKey, requestedModel);
+    const research = await researchWeb(message);
+    if (!configuredProvider) {
+      if (research) return `Here is what I found online:\n\n${research}`;
+      return "I could not find reliable public web information for that request right now. Try adding a little more detail to the instruction.";
+    }
+    const researchedMessage = research ? `${message}\n\nWeb research collected before answering:\n${research}\n\nUse this research when relevant, cite the source URLs naturally, and do not claim to have accessed private apps or websites.` : message;
+    return requestProvider(configuredProvider, researchedMessage, history, sessionKey, requestedModel);
   }
   const model = requestedModel?.trim();
   if (model && !/^[a-zA-Z0-9._-]+$/.test(model)) throw new Error("The model ID contains unsupported characters.");
