@@ -3,8 +3,10 @@
 import { useState } from "react";
 import {
   ArrowUp,
+  Check,
   ChevronDown,
   Clock3,
+  Cpu,
   FileText,
   Globe2,
   Menu,
@@ -16,6 +18,15 @@ import {
   Volume2,
   X,
 } from "lucide-react";
+
+const models = [
+  { id: "local", label: "Jarvis local", detail: "Built-in preview assistant", ready: true },
+  { id: "openai", label: "OpenAI", detail: "GPT and Codex models", ready: false },
+  { id: "anthropic", label: "Anthropic", detail: "Claude models", ready: false },
+  { id: "gemini", label: "Google Gemini", detail: "Gemini Pro models", ready: false },
+] as const;
+
+type ModelId = (typeof models)[number]["id"];
 
 const suggestions = [
   { icon: Globe2, title: "Plan my day", detail: "Review calendar, tasks & weather" },
@@ -114,6 +125,8 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeRecent, setActiveRecent] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<ModelId>("local");
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
 
   function submitMessage(text = message) {
     const prompt = text.trim();
@@ -121,10 +134,30 @@ export default function Home() {
     setMessages((current) => [...current, { role: "user", text: prompt }]);
     setMessage("");
     setIsThinking(true);
-    window.setTimeout(() => {
-      setMessages((current) => [...current, { role: "assistant", text: getReply(prompt, new Date()) }]);
-      setIsThinking(false);
-    }, 650);
+    if (selectedModel === "local") {
+      window.setTimeout(() => {
+        setMessages((current) => [...current, { role: "assistant", text: getReply(prompt, new Date()) }]);
+        setIsThinking(false);
+      }, 650);
+      return;
+    }
+
+    void fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: selectedModel, message: prompt }),
+    })
+      .then(async (response) => {
+        const body = await response.json() as { reply?: string; error?: string };
+        if (!response.ok || !body.reply) throw new Error(body.error ?? "The provider did not return a response.");
+        return body.reply;
+      })
+      .then((reply) => setMessages((current) => [...current, { role: "assistant", text: reply }]))
+      .catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : "The provider could not be reached.";
+        setMessages((current) => [...current, { role: "assistant", text: detail }]);
+      })
+      .finally(() => setIsThinking(false));
   }
 
   function openRecent(item: string) {
@@ -165,7 +198,19 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
-          <div className="topbar-title"><span>New conversation</span><ChevronDown size={15} /></div>
+          <div className="topbar-title"><span>{activeRecent ?? "New conversation"}</span><ChevronDown size={15} /></div>
+          <div className="model-switcher">
+            <button className="model-trigger" onClick={() => setModelMenuOpen((open) => !open)} aria-expanded={modelMenuOpen}>
+              <Cpu size={15} /><span>{models.find((model) => model.id === selectedModel)?.label}</span><ChevronDown size={14} />
+            </button>
+            {modelMenuOpen && <div className="model-menu">
+              <p>AI CONNECTORS</p>
+              {models.map((model) => <button key={model.id} className={selectedModel === model.id ? "selected" : ""} onClick={() => { setSelectedModel(model.id); setModelMenuOpen(false); }}>
+                <span><strong>{model.label}</strong><small>{model.detail}</small></span>{selectedModel === model.id ? <Check size={15} /> : <em>{model.ready ? "Ready" : "API key"}</em>}
+              </button>)}
+              <div className="model-note">Providers use your own authorized API access.</div>
+            </div>}
+          </div>
           <div className="mode"><span className="mode-dot" />All systems operational</div>
         </header>
 
