@@ -92,6 +92,31 @@ function linkifyText(text: string) {
   );
 }
 
+type SystemIntent =
+  | { kind: "system"; action: "on" | "off"; target: string }
+  | { kind: "files"; action: "list" | "read"; path: string }
+  | { kind: "open-url"; url: string };
+
+function detectIntent(prompt: string): SystemIntent | null {
+  const lower = prompt.toLowerCase();
+  if (/^https?:\/\/\S+$/.test(prompt.trim())) return { kind: "open-url", url: prompt.trim() };
+  const actionMatch = lower.match(/\b(open|launch|start|turn on|switch on|power on|on|close|quit|stop|turn off|switch off|power off|off|shut down|kill)\b/);
+  const targetMatch = lower.match(/\b(chrome|google chrome|browser|edge|safari|firefox|terminal|cmd|command line|code|vscode|visual studio code|spotify|slack|calculator|calc|notes|notepad|excel|word|powerpoint|figma|discord|telegram|whatsapp|gmail|mail|maps|music|vlc|zoom|teams|photos|screenshot|settings|file explorer|files|finder|app)\b/);
+  if (actionMatch && targetMatch) {
+    const action = /\b(open|launch|start|turn on|switch on|power on|on)\b/.test(actionMatch[0]) ? "on" : "off";
+    return { kind: "system", action, target: targetMatch[0] };
+  }
+  if (/\b(list|show)\b.*\b(folder|directory|files|contents)\b/.test(lower)) {
+    const pathMatch = prompt.match(/(?:in|of|at|for)?\s*([/~][^\s]+|[A-Za-z]:\\[^\s]+|\.{1,2}[\\/][^\s]*)/);
+    return { kind: "files", action: "list", path: pathMatch?.[1] ?? "~" };
+  }
+  if (/\b(read|open|show|cat)\b.*\bfile\b/.test(lower)) {
+    const pathMatch = prompt.match(/([/~][^\s]+|[A-Za-z]:\\[^\s]+|\.{1,2}[\\/][^\s]*)/);
+    if (pathMatch) return { kind: "files", action: "read", path: pathMatch[1] };
+  }
+  return null;
+}
+
 export default function Home() {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
@@ -117,6 +142,54 @@ export default function Home() {
     setMessages((current) => [...current, { role: "user", text: prompt }]);
     setMessage("");
     setIsThinking(true);
+
+    const intent = detectIntent(prompt);
+    if (intent?.kind === "open-url") {
+      window.open(intent.url, "_blank", "noopener,noreferrer");
+      setMessages((current) => [...current, { role: "assistant", text: `Opening ${intent.url} in a new tab.` }]);
+      setIsThinking(false);
+      return;
+    }
+    if (intent?.kind === "system") {
+      void fetch("/api/system", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: intent.action, target: intent.target }) })
+        .then(async (response) => {
+          const body = await response.json() as { status?: string; error?: string; target?: string };
+          if (!response.ok) throw new Error(body.error ?? "The system command could not be run.");
+          return body;
+        })
+        .then((result) => setMessages((current) => [...current, { role: "assistant", text: `${intent.action === "on" ? "Opening" : "Closing"} ${result.target ?? intent.target} on your computer.` }]))
+        .catch((error: unknown) => {
+          const detail = error instanceof Error ? error.message : "The system command could not be run.";
+          setMessages((current) => [...current, { role: "assistant", text: detail }]);
+        })
+        .finally(() => setIsThinking(false));
+      return;
+    }
+    if (intent?.kind === "files") {
+      void fetch("/api/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: intent.action, path: intent.path }) })
+        .then(async (response) => {
+          const body = await response.json() as { entries?: { name: string; kind: string }[]; text?: string; path?: string; error?: string };
+          if (!response.ok) throw new Error(body.error ?? "Could not access the requested path.");
+          return body;
+        })
+        .then((body) => {
+          if (intent.action === "list") {
+            const list = (body.entries ?? []).map((entry) => `- ${entry.name}${entry.kind === "directory" ? "/" : ""}`).join("\n");
+            const text = list ? `Contents of ${body.path}:\n${list}` : `${body.path} is empty.`;
+            setMessages((current) => [...current, { role: "assistant", text }]);
+            return;
+          }
+          const preview = (body.text ?? "").slice(0, 2000);
+          setMessages((current) => [...current, { role: "assistant", text: `${body.path}:\n${preview}` }]);
+        })
+        .catch((error: unknown) => {
+          const detail = error instanceof Error ? error.message : "Could not access the requested path.";
+          setMessages((current) => [...current, { role: "assistant", text: detail }]);
+        })
+        .finally(() => setIsThinking(false));
+      return;
+    }
+
     void fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
