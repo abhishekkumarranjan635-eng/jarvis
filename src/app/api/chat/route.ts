@@ -39,7 +39,12 @@ async function requestProvider(provider: Provider, message: string, sessionKey?:
       body: JSON.stringify({ model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini", messages: [{ role: "system", content: systemPrompt }, { role: "user", content: message }] }),
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error?.message ?? "OpenAI could not complete the request.");
+    if (!response.ok) {
+      if (payload.error?.code === "insufficient_quota" || /quota|billing/i.test(payload.error?.message ?? "")) {
+        throw new Error("OpenAI accepted the API key, but this account has no available API quota. Add billing or credits in the OpenAI Platform account, then try again. A ChatGPT subscription does not include API usage.");
+      }
+      throw new Error(payload.error?.message ?? "OpenAI could not complete the request.");
+    }
     return payload.choices?.[0]?.message?.content ?? "OpenAI returned no response.";
   }
 
