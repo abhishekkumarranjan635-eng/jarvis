@@ -59,7 +59,19 @@ function getReply(prompt: string) {
   if (query.includes("weather")) {
     return "I do not have live weather access connected in this preview, so I cannot reliably check conditions. I can help you plan what to look for, though.";
   }
-  return "Understood. I am operating in preview mode, so I can help with conversation and planning here, while connected automations remain unavailable.";
+  if (query.includes("hello") || query.includes("hi") || query.includes("hey")) {
+    return "Hello, Abhishek. I am ready when you are. What would you like to work through?";
+  }
+  if (query.includes("remind") || query.includes("reminder")) {
+    return "I can help you phrase and plan a reminder, but no calendar or reminder integration is connected in this workspace yet. Tell me the task and time, and I will prepare it.";
+  }
+  if (query.includes("email") || query.includes("send")) {
+    return "I can draft the message for you, but I cannot send email until an email integration is connected. Who is it for, and what should it say?";
+  }
+  if (query.includes("help")) {
+    return "I can help you plan your day, write and summarize content, prepare research, and organize next steps. Connected tasks such as sending messages need their respective integration enabled.";
+  }
+  return `I understand: "${prompt}". I can help you break this into a clear next step, draft a response, or make a practical plan. Which direction would be most useful?`;
 }
 
 export default function Home() {
