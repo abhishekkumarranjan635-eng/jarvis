@@ -28,6 +28,14 @@ const models = [
 
 type ModelId = (typeof models)[number]["id"];
 
+const defaultProviderModels: Record<Exclude<ModelId, "local">, string> = {
+  openai: "gpt-4.1-mini",
+  anthropic: "claude-sonnet-4-20250514",
+  gemini: "gemini-2.5-flash",
+};
+
+type SessionConnector = { apiKey: string; model: string };
+
 const suggestions = [
   { icon: Globe2, title: "Plan my day", detail: "Review calendar, tasks & weather" },
   { icon: FileText, title: "Summarize notes", detail: "Turn recent notes into highlights" },
@@ -139,7 +147,8 @@ export default function Home() {
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [connectorModel, setConnectorModel] = useState<Exclude<ModelId, "local"> | null>(null);
   const [connectorKey, setConnectorKey] = useState("");
-  const [sessionKeys, setSessionKeys] = useState<Partial<Record<ModelId, string>>>({});
+  const [connectorVersion, setConnectorVersion] = useState("");
+  const [sessionConnectors, setSessionConnectors] = useState<Partial<Record<ModelId, SessionConnector>>>({});
   const [connectorError, setConnectorError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
 
@@ -176,7 +185,7 @@ export default function Home() {
     void fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: selectedModel, message: prompt, apiKey: sessionKeys[selectedModel] }),
+      body: JSON.stringify({ provider: selectedModel, message: prompt, apiKey: sessionConnectors[selectedModel]?.apiKey, model: sessionConnectors[selectedModel]?.model }),
     })
       .then(async (response) => {
         const body = await response.json() as { reply?: string; error?: string };
@@ -213,7 +222,8 @@ export default function Home() {
       return;
     }
     setConnectorModel(model);
-    setConnectorKey(sessionKeys[model] ?? "");
+    setConnectorKey(sessionConnectors[model]?.apiKey ?? "");
+    setConnectorVersion(sessionConnectors[model]?.model ?? defaultProviderModels[model]);
     setConnectorError("");
     setModelMenuOpen(false);
   }
@@ -226,14 +236,15 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: connectorModel, apiKey: connectorKey.trim(), message: "Reply with exactly the word connected." }),
+        body: JSON.stringify({ provider: connectorModel, apiKey: connectorKey.trim(), model: connectorVersion.trim(), message: "Reply with exactly the word connected." }),
       });
       const body = await response.json() as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "The provider rejected this API key.");
-      setSessionKeys((keys) => ({ ...keys, [connectorModel]: connectorKey.trim() }));
+      setSessionConnectors((connectors) => ({ ...connectors, [connectorModel]: { apiKey: connectorKey.trim(), model: connectorVersion.trim() } }));
       setSelectedModel(connectorModel);
       setConnectorModel(null);
       setConnectorKey("");
+      setConnectorVersion("");
     } catch (error: unknown) {
       setConnectorError(error instanceof Error ? error.message : "The provider could not validate this API key.");
     } finally {
@@ -272,7 +283,7 @@ export default function Home() {
             {modelMenuOpen && <div className="model-menu">
               <p>AI CONNECTORS</p>
               {models.map((model) => <button key={model.id} className={selectedModel === model.id ? "selected" : ""} onClick={() => selectConnector(model.id)}>
-                <span><strong>{model.label}</strong><small>{model.detail}</small></span>{selectedModel === model.id ? <Check size={15} /> : <em>{model.ready ? "Ready" : sessionKeys[model.id] ? "Connected" : "API key"}</em>}
+                <span><strong>{model.label}</strong><small>{model.detail}</small></span>{selectedModel === model.id ? <Check size={15} /> : <em>{model.ready ? "Ready" : sessionConnectors[model.id] ? "Connected" : "API key"}</em>}
               </button>)}
               <div className="model-note">Providers use your own authorized API access.</div>
             </div>}
@@ -325,9 +336,11 @@ export default function Home() {
             <p className="connector-copy">Enter an authorized API key to use this provider for the current browser session.</p>
             <label htmlFor="connector-key">API key</label>
             <input id="connector-key" type="password" value={connectorKey} onChange={(event) => setConnectorKey(event.target.value)} placeholder={`Paste your ${models.find((model) => model.id === connectorModel)?.label} API key`} autoFocus />
+            <label htmlFor="connector-version">Model version</label>
+            <input id="connector-version" value={connectorVersion} onChange={(event) => setConnectorVersion(event.target.value)} placeholder="Enter the model ID enabled for your API key" />
             {connectorError && <p className="connector-error">{connectorError}</p>}
             <p className="connector-note">Jarvis validates the key with a small provider request before connecting. Your key is cleared when you refresh this page.</p>
-            <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)} disabled={isConnecting}>Cancel</button><button className="connect-connector" onClick={() => void connectProvider()} disabled={!connectorKey.trim() || isConnecting}>{isConnecting ? "Validating..." : "Connect provider"} <ArrowUp size={15} /></button></div>
+            <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)} disabled={isConnecting}>Cancel</button><button className="connect-connector" onClick={() => void connectProvider()} disabled={!connectorKey.trim() || !connectorVersion.trim() || isConnecting}>{isConnecting ? "Validating..." : "Connect provider"} <ArrowUp size={15} /></button></div>
           </div>
         </div>}
       </section>

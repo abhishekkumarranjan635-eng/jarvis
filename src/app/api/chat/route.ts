@@ -9,7 +9,7 @@ function error(message: string, status: number) {
 }
 
 export async function POST(request: Request) {
-  let body: { provider?: Provider; message?: string; apiKey?: string };
+  let body: { provider?: Provider; message?: string; apiKey?: string; model?: string };
   try {
     body = await request.json();
   } catch {
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const reply = await requestProvider(body.provider, body.message.trim(), body.apiKey);
+    const reply = await requestProvider(body.provider, body.message.trim(), body.apiKey, body.model);
     return NextResponse.json({ reply });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "The AI connector could not be reached.";
@@ -29,14 +29,16 @@ export async function POST(request: Request) {
   }
 }
 
-async function requestProvider(provider: Provider, message: string, sessionKey?: string) {
+async function requestProvider(provider: Provider, message: string, sessionKey?: string, requestedModel?: string) {
+  const model = requestedModel?.trim();
+  if (model && !/^[a-zA-Z0-9._-]+$/.test(model)) throw new Error("The model ID contains unsupported characters.");
   if (provider === "openai") {
     const key = sessionKey || process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OpenAI is not connected. Add OPENAI_API_KEY to the server environment.");
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini", messages: [{ role: "system", content: systemPrompt }, { role: "user", content: message }] }),
+      body: JSON.stringify({ model: model || process.env.OPENAI_MODEL || "gpt-4.1-mini", messages: [{ role: "system", content: systemPrompt }, { role: "user", content: message }] }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -54,7 +56,7 @@ async function requestProvider(provider: Provider, message: string, sessionKey?:
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514", max_tokens: 700, system: systemPrompt, messages: [{ role: "user", content: message }] }),
+      body: JSON.stringify({ model: model || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514", max_tokens: 700, system: systemPrompt, messages: [{ role: "user", content: message }] }),
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error?.message ?? "Anthropic could not complete the request.");
@@ -63,8 +65,8 @@ async function requestProvider(provider: Provider, message: string, sessionKey?:
 
   const key = sessionKey || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("Google Gemini is not connected. Add GEMINI_API_KEY to the server environment.");
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-pro";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+  const geminiModel = model || process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${key}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ systemInstruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: "user", parts: [{ text: message }] }] }),
