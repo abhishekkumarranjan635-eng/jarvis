@@ -81,7 +81,16 @@ const recentConversations: Record<string, ChatMessage[]> = {
 type ChatMessage = {
   role: "user" | "assistant";
   text: string;
+  sources?: string[];
 };
+
+function linkifyText(text: string) {
+  const parts = text.split(/(https?:\/\/[^\s)]+)/g);
+  return parts.map((part, index) => /^https?:\/\//.test(part)
+    ? <a key={`link-${index}`} href={part} target="_blank" rel="noreferrer">{part}</a>
+    : <span key={`text-${index}`}>{part}</span>,
+  );
+}
 
 export default function Home() {
   const [message, setMessage] = useState("");
@@ -121,11 +130,11 @@ export default function Home() {
       }),
     })
       .then(async (response) => {
-        const body = await response.json() as { reply?: string; error?: string };
+        const body = await response.json() as { reply?: string; sources?: string[]; error?: string };
         if (!response.ok || !body.reply) throw new Error(body.error ?? "The provider did not return a response.");
-        return body.reply;
+        return { text: body.reply, sources: body.sources ?? [] };
       })
-      .then((reply) => setMessages((current) => [...current, { role: "assistant", text: reply }]))
+      .then((reply) => setMessages((current) => [...current, { role: "assistant", text: reply.text, sources: reply.sources }]))
       .catch((error: unknown) => {
         const detail = error instanceof Error ? error.message : "The provider could not be reached.";
         setMessages((current) => [...current, { role: "assistant", text: detail }]);
@@ -171,8 +180,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: connectorModel, apiKey: connectorKey.trim(), model: connectorVersion.trim(), message: "Reply with exactly the word connected." }),
       });
-      const body = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(body.error ?? "The provider rejected this API key.");
+      const body = await response.json() as { reply?: string; error?: string };
+      if (!response.ok || !body.reply) throw new Error(body.error ?? "The provider rejected this API key.");
       setSessionConnectors((connectors) => ({ ...connectors, [connectorModel]: { apiKey: connectorKey.trim(), model: connectorVersion.trim() } }));
       setLocalConnector(connectorModel);
       setSelectedModel("local");
@@ -291,7 +300,13 @@ export default function Home() {
           </> : <div className="messages" aria-live="polite">
             {messages.map((item, index) => <div className={`message ${item.role}`} key={`${item.role}-${index}`}>
               {item.role === "assistant" && <div className="message-mark"><Sparkles size={13} /></div>}
-              <p>{item.text}</p>
+              <div>
+                <p>{linkifyText(item.text)}</p>
+                {item.sources && item.sources.length > 0 && <div className="message p" style={{ padding: "0 15px 12px", marginTop: "-4px" }}>
+                  <p style={{ padding: "0 0 6px", fontSize: "11px", color: "#6b756e", textTransform: "uppercase", letterSpacing: ".08em", background: "transparent", border: "0" }}>Sources</p>
+                  <ul>{item.sources.map((source) => <li key={source}><a href={source} target="_blank" rel="noreferrer">{source}</a></li>)}</ul>
+                </div>}
+              </div>
             </div>)}
             {isThinking && <div className="message assistant thinking"><div className="message-mark"><Sparkles size={13} /></div><p><i /><i /><i /></p></div>}
           </div>}

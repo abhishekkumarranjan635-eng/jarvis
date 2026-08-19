@@ -6,7 +6,7 @@ type ChatMessage = { role: "user" | "assistant"; text: string };
 type SearchTopic = { Text?: string; FirstURL?: string; Topics?: SearchTopic[] };
 type SearchResponse = { AbstractText?: string; AbstractSource?: string; AbstractURL?: string; RelatedTopics?: SearchTopic[] };
 
-const systemPrompt = "You are Jarvis, Abhishek's personal AI assistant. Follow the user's instruction directly and answer the request, rather than offering generic next steps. Use the conversation context when relevant. Be concise, accurate, and truthful about capabilities or unavailable live data. Ask one focused question only when essential information is missing.";
+const systemPrompt = "You are Jarvis, Abhishek's personal AI assistant. Follow the user's instruction directly and answer the request, rather than offering generic next steps. Use the conversation context when relevant. Be concise, accurate, and truthful about capabilities or unavailable live data. Ask one focused question only when essential information is missing. When research is provided, base the answer on it, mention the source naturally, and do not claim to have accessed private apps or websites.";
 
 function error(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -31,8 +31,8 @@ export async function POST(request: Request) {
     const history = body.messages?.filter((item): item is ChatMessage =>
       (item.role === "user" || item.role === "assistant") && typeof item.text === "string" && item.text.trim().length > 0,
     ).slice(-12);
-    const reply = await requestProvider(body.provider, body.message.trim(), history, body.apiKey, body.model, body.backingProvider);
-    return NextResponse.json({ reply });
+    const { reply, sources } = await requestProvider(body.provider, body.message.trim(), history, body.apiKey, body.model, body.backingProvider);
+    return NextResponse.json({ reply, sources });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "The AI connector could not be reached.";
     return error(message, 503);
@@ -55,7 +55,7 @@ function collectTopics(topics: SearchTopic[] | undefined, results: SearchTopic[]
   return results;
 }
 
-async function researchWeb(query: string) {
+async function researchWeb(query: string): Promise<{ facts: string; sources: string[] } | null> {
   try {
     const response = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`, {
       headers: { Accept: "application/json" },
@@ -64,27 +64,39 @@ async function researchWeb(query: string) {
     if (!response.ok) return null;
     const result = await response.json() as SearchResponse;
     const topics = collectTopics(result.RelatedTopics);
-    const sources = [
-      result.AbstractText && result.AbstractURL ? `- ${result.AbstractText}\n  Source: ${result.AbstractURL}` : "",
-      ...topics.map((topic) => `- ${topic.Text}\n  Source: ${topic.FirstURL}`),
-    ].filter(Boolean);
-    return sources.length ? sources.join("\n") : null;
+    const entries: { text: string; url: string }[] = [];
+    if (result.AbstractText && result.AbstractURL) entries.push({ text: result.AbstractText, url: result.AbstractURL });
+    for (const topic of topics) if (topic.Text && topic.FirstURL) entries.push({ text: topic.Text, url: topic.FirstURL });
+    if (!entries.length) return null;
+    return {
+      facts: entries.map((entry) => `- ${entry.text}\n  Source: ${entry.url}`).join("\n"),
+      sources: entries.map((entry) => entry.url),
+    };
   } catch {
     return null;
   }
 }
 
-async function requestProvider(provider: Provider, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string, backingProvider?: ExternalProvider) {
+async function requestProvider(provider: Provider, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string, backingProvider?: ExternalProvider): Promise<{ reply: string; sources: string[] }> {
   if (provider === "local") {
     const configuredProvider = backingProvider ?? defaultProvider();
     const research = await researchWeb(message);
     if (!configuredProvider) {
-      if (research) return `Here is what I found online:\n\n${research}`;
-      return "I could not find reliable public web information for that request right now. Try adding a little more detail to the instruction.";
+      if (research) {
+        const summary = research.facts.split("\n").filter((line) => line.startsWith("- ")).map((line) => line.replace(/^-\s*/, "").trim()).join(" ");
+        return { reply: summary || "Here is what I found online.", sources: research.sources };
+      }
+      return { reply: "I could not find reliable public web information for that request right now. Try adding a little more detail to the instruction.", sources: [] };
     }
-    const researchedMessage = research ? `${message}\n\nWeb research collected before answering:\n${research}\n\nUse this research when relevant, cite the source URLs naturally, and do not claim to have accessed private apps or websites.` : message;
-    return requestProvider(configuredProvider, researchedMessage, history, sessionKey, requestedModel);
+    const researchedMessage = research ? `${message}\n\nWeb research collected before answering:\n${research.facts}\n\nUse this research when relevant, cite the source URLs naturally, and do not claim to have accessed private apps or websites.` : message;
+    const reply = await requestExternalProvider(configuredProvider, researchedMessage, history, sessionKey, requestedModel);
+    return { reply, sources: research?.sources ?? [] };
   }
+  const reply = await requestExternalProvider(provider, message, history, sessionKey, requestedModel);
+  return { reply, sources: [] };
+}
+
+async function requestExternalProvider(provider: Exclude<Provider, "local">, message: string, history: ChatMessage[] | undefined, sessionKey?: string, requestedModel?: string) {
   const model = requestedModel?.trim();
   if (model && !/^[a-zA-Z0-9._-]+$/.test(model)) throw new Error("The model ID contains unsupported characters.");
   if (provider === "openai") {
