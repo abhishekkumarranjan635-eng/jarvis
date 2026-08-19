@@ -103,6 +103,9 @@ function getReply(prompt: string, now = new Date()) {
   if (query.includes("weather")) {
     return "I do not have live weather access connected in this preview, so I cannot reliably check conditions. I can help you plan what to look for, though.";
   }
+  if (query.includes("what can you do") || query.includes("your capabilities") || query.includes("what do you do")) {
+    return "I can answer questions, plan your day, summarize text, draft messages, organize tasks, and help with research. With an authorized AI connector selected, I can also use OpenAI, Claude, or Gemini for richer answers. Actions such as sending email, checking live weather, or controlling your PC require their own connected integration.";
+  }
   if (query.includes("hello") || query.includes("hi") || query.includes("hey")) {
     return "Hello, Abhishek. I am ready when you are. What would you like to work through?";
   }
