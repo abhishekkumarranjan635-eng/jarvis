@@ -25,6 +25,21 @@ const suggestions = [
 
 const recent = ["Monday planning", "Flight options to Tokyo", "Project Luna notes"];
 
+const recentConversations: Record<string, ChatMessage[]> = {
+  "Monday planning": [
+    { role: "user", text: "Help me organize Monday." },
+    { role: "assistant", text: "Your Monday plan is ready: prioritize the morning deep-work block, review priorities before lunch, and reserve the afternoon for follow-ups." },
+  ],
+  "Flight options to Tokyo": [
+    { role: "user", text: "Find flight options to Tokyo." },
+    { role: "assistant", text: "I do not have live booking access in this preview. I can compare options if you share dates, departure city, and a few flight links." },
+  ],
+  "Project Luna notes": [
+    { role: "user", text: "Summarize the Project Luna notes." },
+    { role: "assistant", text: "The notes are not connected to this preview. Paste them here and I will extract decisions, action items, and open questions." },
+  ],
+};
+
 type ChatMessage = {
   role: "user" | "assistant";
   text: string;
@@ -53,6 +68,7 @@ export default function Home() {
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeRecent, setActiveRecent] = useState<string | null>(null);
 
   function submitMessage(text = message) {
     const prompt = text.trim();
@@ -66,6 +82,21 @@ export default function Home() {
     }, 650);
   }
 
+  function openRecent(item: string) {
+    setActiveRecent(item);
+    setMessages(recentConversations[item]);
+    setMessage("");
+    setIsThinking(false);
+    setMenuOpen(false);
+  }
+
+  function startNewConversation() {
+    setActiveRecent(null);
+    setMessages([]);
+    setMessage("");
+    setMenuOpen(false);
+  }
+
   return (
     <main className="jarvis-shell">
       <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
@@ -74,10 +105,10 @@ export default function Home() {
           <span>jarvis</span>
           <button className="close-menu" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={19} /></button>
         </div>
-        <button className="new-chat"><Plus size={17} /> New conversation</button>
+        <button className="new-chat" onClick={startNewConversation}><Plus size={17} /> New conversation</button>
         <nav className="history" aria-label="Conversation history">
           <p>RECENT</p>
-          {recent.map((item, index) => <button key={item} className={index === 0 ? "active" : ""}><Clock3 size={15} />{item}</button>)}
+          {recent.map((item) => <button key={item} onClick={() => openRecent(item)} className={activeRecent === item ? "active" : ""}><Clock3 size={15} />{item}</button>)}
         </nav>
         <div className="sidebar-foot">
           <div className="avatar">A</div>
