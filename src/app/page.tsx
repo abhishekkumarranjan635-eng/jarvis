@@ -151,6 +151,8 @@ export default function Home() {
   const [sessionConnectors, setSessionConnectors] = useState<Partial<Record<ModelId, SessionConnector>>>({});
   const [connectorError, setConnectorError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   function submitMessage(text = message) {
     const prompt = text.trim();
@@ -225,6 +227,7 @@ export default function Home() {
     setConnectorKey(sessionConnectors[model]?.apiKey ?? "");
     setConnectorVersion(sessionConnectors[model]?.model ?? defaultProviderModels[model]);
     setConnectorError("");
+    setAvailableModels([]);
     setModelMenuOpen(false);
   }
 
@@ -249,6 +252,27 @@ export default function Home() {
       setConnectorError(error instanceof Error ? error.message : "The provider could not validate this API key.");
     } finally {
       setIsConnecting(false);
+    }
+  }
+
+  async function loadProviderModels() {
+    if (!connectorModel || !connectorKey.trim()) return;
+    setIsLoadingModels(true);
+    setConnectorError("");
+    try {
+      const response = await fetch("/api/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: connectorModel, apiKey: connectorKey.trim() }),
+      });
+      const body = await response.json() as { models?: string[]; error?: string };
+      if (!response.ok || !body.models) throw new Error(body.error ?? "Could not load models for this key.");
+      setAvailableModels(body.models);
+      if (body.models.length && !body.models.includes(connectorVersion)) setConnectorVersion(body.models[0]);
+    } catch (error: unknown) {
+      setConnectorError(error instanceof Error ? error.message : "Could not load models for this key.");
+    } finally {
+      setIsLoadingModels(false);
     }
   }
 
@@ -337,7 +361,9 @@ export default function Home() {
             <label htmlFor="connector-key">API key</label>
             <input id="connector-key" type="password" value={connectorKey} onChange={(event) => setConnectorKey(event.target.value)} placeholder={`Paste your ${models.find((model) => model.id === connectorModel)?.label} API key`} autoFocus />
             <label htmlFor="connector-version">Model version</label>
-            <input id="connector-version" value={connectorVersion} onChange={(event) => setConnectorVersion(event.target.value)} placeholder="Enter the model ID enabled for your API key" />
+            <input id="connector-version" list="provider-models" value={connectorVersion} onChange={(event) => setConnectorVersion(event.target.value)} placeholder="Enter or load a model ID" />
+            <datalist id="provider-models">{availableModels.map((model) => <option key={model} value={model} />)}</datalist>
+            <button className="load-models" onClick={() => void loadProviderModels()} disabled={!connectorKey.trim() || isLoadingModels}>{isLoadingModels ? "Loading models..." : "Load all models available to this key"}</button>
             {connectorError && <p className="connector-error">{connectorError}</p>}
             <p className="connector-note">Jarvis validates the key with a small provider request before connecting. Your key is cleared when you refresh this page.</p>
             <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)} disabled={isConnecting}>Cancel</button><button className="connect-connector" onClick={() => void connectProvider()} disabled={!connectorKey.trim() || !connectorVersion.trim() || isConnecting}>{isConnecting ? "Validating..." : "Connect provider"} <ArrowUp size={15} /></button></div>
