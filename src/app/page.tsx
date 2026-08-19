@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowUp,
   Check,
@@ -35,6 +35,19 @@ const defaultProviderModels: Record<Exclude<ModelId, "local">, string> = {
 };
 
 type SessionConnector = { apiKey: string; model: string };
+
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
 
 const suggestions = [
   { icon: Globe2, title: "Plan my day", detail: "Review calendar, tasks & weather" },
@@ -139,6 +152,7 @@ function shouldSearchWeb(prompt: string) {
 export default function Home() {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("Voice ready");
   const [isThinking, setIsThinking] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -153,6 +167,7 @@ export default function Home() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   function submitMessage(text = message) {
     const prompt = text.trim();
@@ -276,6 +291,51 @@ export default function Home() {
     }
   }
 
+  function toggleVoiceCommand() {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const SpeechRecognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceStatus("Voice commands are not supported in this browser");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
+      if (!transcript) return;
+      setMessage(transcript);
+      setVoiceStatus("Command received");
+      submitMessage(transcript);
+    };
+    recognition.onerror = (event) => {
+      const errors: Record<string, string> = {
+        "not-allowed": "Microphone permission was denied",
+        "no-speech": "No speech detected. Try again.",
+        "network": "Voice recognition needs an internet connection",
+      };
+      setVoiceStatus(errors[event.error] ?? "Voice command could not be recognized");
+    };
+    recognition.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    setListening(true);
+    setVoiceStatus("Listening...");
+    recognition.start();
+  }
+
   return (
     <main className="jarvis-shell">
       <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
@@ -345,10 +405,10 @@ export default function Home() {
         <div className="composer-area">
           <div className="composer">
             <input value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submitMessage()} placeholder="Ask Jarvis anything..." aria-label="Message Jarvis" />
-            <button className={`mic ${listening ? "listening" : ""}`} onClick={() => { setListening(!listening); setMessage(listening ? "" : "Listening is not available in this preview."); }} aria-label="Use voice input"><Mic size={19} /></button>
+            <button className={`mic ${listening ? "listening" : ""}`} onClick={toggleVoiceCommand} aria-label={listening ? "Stop voice input" : "Use voice input"}><Mic size={19} /></button>
             <button className="send" onClick={() => submitMessage()} disabled={!message.trim()} aria-label="Send message"><ArrowUp size={18} /></button>
           </div>
-          <div className="composer-meta"><span><Volume2 size={14} />Voice ready</span><span>Jarvis can make mistakes. Check important info.</span></div>
+          <div className="composer-meta"><span><Volume2 size={14} />{voiceStatus}</span><span>Jarvis can make mistakes. Check important info.</span></div>
         </div>
 
         {connectorModel && <div className="connector-overlay" role="dialog" aria-modal="true" aria-labelledby="connector-title">
