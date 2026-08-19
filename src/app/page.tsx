@@ -98,19 +98,25 @@ type SystemIntent =
   | { kind: "open-url"; url: string };
 
 function detectIntent(prompt: string): SystemIntent | null {
-  const lower = prompt.toLowerCase();
+  const lower = prompt.toLowerCase().trim();
   if (/^https?:\/\/\S+$/.test(prompt.trim())) return { kind: "open-url", url: prompt.trim() };
-  const actionMatch = lower.match(/\b(open|launch|start|turn on|switch on|power on|on|close|quit|stop|turn off|switch off|power off|off|shut down|kill)\b/);
-  const targetMatch = lower.match(/\b(chrome|google chrome|browser|edge|safari|firefox|terminal|cmd|command line|code|vscode|visual studio code|spotify|slack|calculator|calc|notes|notepad|excel|word|powerpoint|figma|discord|telegram|whatsapp|gmail|mail|maps|music|vlc|zoom|teams|photos|screenshot|settings|file explorer|files|finder|app)\b/);
+
+  const actionMatch = lower.match(/\b(open|launch|start|turn on|switch on|power on|close|quit|stop|turn off|switch off|power off|shut down|kill)\b/);
+  const targetMatch = lower.match(/\b(chrome|google chrome|browser|edge|safari|firefox|terminal|cmd|command line|code|vscode|visual studio code|spotify|slack|calculator|calc|notes|notepad|excel|word|powerpoint|figma|discord|telegram|whatsapp|gmail|mail|maps|music|vlc|zoom|teams|photos|screenshot|settings|file explorer|finder|app)\b/);
   if (actionMatch && targetMatch) {
-    const action = /\b(open|launch|start|turn on|switch on|power on|on)\b/.test(actionMatch[0]) ? "on" : "off";
+    const action = /\b(open|launch|start|turn on|switch on|power on)\b/.test(actionMatch[0]) ? "on" : "off";
     return { kind: "system", action, target: targetMatch[0] };
   }
+
+  if (/^(on|off)\b/.test(lower) && targetMatch) {
+    return { kind: "system", action: lower.startsWith("on") ? "on" : "off", target: targetMatch[0] };
+  }
+
   if (/\b(list|show)\b.*\b(folder|directory|files|contents)\b/.test(lower)) {
     const pathMatch = prompt.match(/(?:in|of|at|for)?\s*([/~][^\s]+|[A-Za-z]:\\[^\s]+|\.{1,2}[\\/][^\s]*)/);
     return { kind: "files", action: "list", path: pathMatch?.[1] ?? "~" };
   }
-  if (/\b(read|open|show|cat)\b.*\bfile\b/.test(lower)) {
+  if (/\b(read|cat|show|preview)\b.*\b(file|contents)\b/.test(lower)) {
     const pathMatch = prompt.match(/([/~][^\s]+|[A-Za-z]:\\[^\s]+|\.{1,2}[\\/][^\s]*)/);
     if (pathMatch) return { kind: "files", action: "read", path: pathMatch[1] };
   }
