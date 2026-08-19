@@ -36,6 +36,12 @@ const defaultProviderModels: Record<Exclude<ModelId, "local">, string> = {
 
 type SessionConnector = { apiKey: string; model: string };
 
+const apiKeyLinks: Record<Exclude<ModelId, "local">, string> = {
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+  gemini: "https://aistudio.google.com/apikey",
+};
+
 type SpeechRecognitionInstance = {
   continuous: boolean;
   interimResults: boolean;
@@ -77,78 +83,6 @@ type ChatMessage = {
   text: string;
 };
 
-function getReply(prompt: string, now = new Date()) {
-  const query = prompt.toLowerCase();
-  const dateFormatter = new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-  const timeFormatter = new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  const shortDateFormatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-  const monthFormatter = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
-  const dayOfWeek = now.getDay();
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - daysFromMonday);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-
-  if (query.includes("time") && !query.includes("times")) {
-    return `It is ${timeFormatter.format(now)} on ${dateFormatter.format(now)}.`;
-  }
-  if (query.includes("what day") || query.includes("today") || query.includes("date")) {
-    return `Today is ${dateFormatter.format(now)}.`;
-  }
-  if (query.includes("week")) {
-    return `This week runs from ${shortDateFormatter.format(weekStart)} through ${shortDateFormatter.format(weekEnd)}. Today is ${dateFormatter.format(now)}.`;
-  }
-  if (query.includes("month")) {
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    return `It is ${monthFormatter.format(now)}. This month has ${daysInMonth} days, and today is ${dateFormatter.format(now)}.`;
-  }
-  if (query.includes("plan") || query.includes("day")) {
-    return "Here is a focused plan: review your top priority, reserve a 90-minute deep-work block, and leave 30 minutes before your next meeting to clear messages.";
-  }
-  if (query.includes("note") || query.includes("summar")) {
-    return "I can summarize your notes once a notes integration is connected. For now, paste the text here and I will turn it into key decisions, actions, and open questions.";
-  }
-  if (query.includes("research") || query.includes("search")) {
-    return "I do not have a web-search integration connected in this preview. Tell me the topic and I can still help you form a concise research brief or evaluate sources you provide.";
-  }
-  if (query.includes("weather")) {
-    return "I do not have live weather access connected in this preview, so I cannot reliably check conditions. I can help you plan what to look for, though.";
-  }
-  if (query.includes("what can you do") || query.includes("your capabilities") || query.includes("what do you do")) {
-    return "I can answer questions, plan your day, summarize text, draft messages, organize tasks, and help with research. With an authorized AI connector selected, I can also use OpenAI, Claude, or Gemini for richer answers. Actions such as sending email, checking live weather, or controlling your PC require their own connected integration.";
-  }
-  if (query.includes("hello") || query.includes("hi") || query.includes("hey")) {
-    return "Hello, Abhishek. I am ready when you are. What would you like to work through?";
-  }
-  if (query.includes("remind") || query.includes("reminder")) {
-    return "I can help you phrase and plan a reminder, but no calendar or reminder integration is connected in this workspace yet. Tell me the task and time, and I will prepare it.";
-  }
-  if (query.includes("email") || query.includes("send")) {
-    return "I can draft the message for you, but I cannot send email until an email integration is connected. Who is it for, and what should it say?";
-  }
-  if (query.includes("help")) {
-    return "I can help you plan your day, write and summarize content, prepare research, and organize next steps. Connected tasks such as sending messages need their respective integration enabled.";
-  }
-  return `I understand: "${prompt}". I can help you break this into a clear next step, draft a response, or make a practical plan. Which direction would be most useful?`;
-}
-
-function shouldSearchWeb(prompt: string) {
-  const query = prompt.toLowerCase().trim();
-  const question = /^(what|who|when|where|why|how|define|explain|tell me about)\b/.test(query);
-  const localRequest = query.includes("what can you do") || query.includes("your capabilities") || query.includes("remind") || query.includes("email") || query.includes("plan my");
-  return question && !localRequest;
-}
-
 export default function Home() {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
@@ -165,8 +99,6 @@ export default function Home() {
   const [sessionConnectors, setSessionConnectors] = useState<Partial<Record<ModelId, SessionConnector>>>({});
   const [connectorError, setConnectorError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   function submitMessage(text = message) {
@@ -175,34 +107,10 @@ export default function Home() {
     setMessages((current) => [...current, { role: "user", text: prompt }]);
     setMessage("");
     setIsThinking(true);
-    if (selectedModel === "local") {
-      if (shouldSearchWeb(prompt)) {
-        void fetch("/api/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: prompt }),
-        })
-          .then(async (response) => {
-            const body = await response.json() as { answer?: string; error?: string };
-            if (!response.ok || !body.answer) throw new Error(body.error ?? "No useful result was found.");
-            return body.answer;
-          })
-          .then((answer) => setMessages((current) => [...current, { role: "assistant", text: answer }]))
-          .catch(() => setMessages((current) => [...current, { role: "assistant", text: "I could not reach the web knowledge service right now. Select an authorized AI connector for a direct model response, or try again shortly." }]))
-          .finally(() => setIsThinking(false));
-        return;
-      }
-      window.setTimeout(() => {
-        setMessages((current) => [...current, { role: "assistant", text: getReply(prompt, new Date()) }]);
-        setIsThinking(false);
-      }, 650);
-      return;
-    }
-
     void fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: selectedModel, message: prompt, apiKey: sessionConnectors[selectedModel]?.apiKey, model: sessionConnectors[selectedModel]?.model }),
+      body: JSON.stringify({ provider: selectedModel, message: prompt, messages, apiKey: sessionConnectors[selectedModel]?.apiKey, model: sessionConnectors[selectedModel]?.model }),
     })
       .then(async (response) => {
         const body = await response.json() as { reply?: string; error?: string };
@@ -242,7 +150,6 @@ export default function Home() {
     setConnectorKey(sessionConnectors[model]?.apiKey ?? "");
     setConnectorVersion(sessionConnectors[model]?.model ?? defaultProviderModels[model]);
     setConnectorError("");
-    setAvailableModels([]);
     setModelMenuOpen(false);
   }
 
@@ -267,27 +174,6 @@ export default function Home() {
       setConnectorError(error instanceof Error ? error.message : "The provider could not validate this API key.");
     } finally {
       setIsConnecting(false);
-    }
-  }
-
-  async function loadProviderModels() {
-    if (!connectorModel || !connectorKey.trim()) return;
-    setIsLoadingModels(true);
-    setConnectorError("");
-    try {
-      const response = await fetch("/api/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: connectorModel, apiKey: connectorKey.trim() }),
-      });
-      const body = await response.json() as { models?: string[]; error?: string };
-      if (!response.ok || !body.models) throw new Error(body.error ?? "Could not load models for this key.");
-      setAvailableModels(body.models);
-      if (body.models.length && !body.models.includes(connectorVersion)) setConnectorVersion(body.models[0]);
-    } catch (error: unknown) {
-      setConnectorError(error instanceof Error ? error.message : "Could not load models for this key.");
-    } finally {
-      setIsLoadingModels(false);
     }
   }
 
@@ -420,13 +306,10 @@ export default function Home() {
             <p className="connector-copy">Enter an authorized API key to use this provider for the current browser session.</p>
             <label htmlFor="connector-key">API key</label>
             <input id="connector-key" type="password" value={connectorKey} onChange={(event) => setConnectorKey(event.target.value)} placeholder={`Paste your ${models.find((model) => model.id === connectorModel)?.label} API key`} autoFocus />
-            <label htmlFor="connector-version">Model version</label>
-            <input id="connector-version" list="provider-models" value={connectorVersion} onChange={(event) => setConnectorVersion(event.target.value)} placeholder="Enter or load a model ID" />
-            <datalist id="provider-models">{availableModels.map((model) => <option key={model} value={model} />)}</datalist>
-            <button className="load-models" onClick={() => void loadProviderModels()} disabled={!connectorKey.trim() || isLoadingModels}>{isLoadingModels ? "Loading models..." : "Load all models available to this key"}</button>
+             <a className="load-models" href={apiKeyLinks[connectorModel]} target="_blank" rel="noreferrer">Get an API key from {models.find((model) => model.id === connectorModel)?.label}</a>
             {connectorError && <p className="connector-error">{connectorError}</p>}
             <p className="connector-note">Jarvis validates the key with a small provider request before connecting. Your key is cleared when you refresh this page.</p>
-            <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)} disabled={isConnecting}>Cancel</button><button className="connect-connector" onClick={() => void connectProvider()} disabled={!connectorKey.trim() || !connectorVersion.trim() || isConnecting}>{isConnecting ? "Validating..." : "Connect provider"} <ArrowUp size={15} /></button></div>
+             <div className="connector-actions"><button className="cancel-connector" onClick={() => setConnectorModel(null)} disabled={isConnecting}>Cancel</button><button className="connect-connector" onClick={() => void connectProvider()} disabled={!connectorKey.trim() || isConnecting}>{isConnecting ? "Validating..." : "Connect provider"} <ArrowUp size={15} /></button></div>
           </div>
         </div>}
       </section>
